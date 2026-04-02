@@ -2,6 +2,7 @@ import { listTemplates } from "@/features/templates/template.repository";
 import { listRuns } from "@/features/runs/run.service";
 import { getGovernanceStatus } from "@/features/governance/governance.service";
 import { listBrowserProfiles } from "@/features/browser-profiles/browser-profile.service";
+import { listAiConnections } from "@/features/ai-connections/ai-connection.service";
 import { TemplatesGrid } from "@/components/templates-grid";
 import { RunsTable } from "@/components/runs-table";
 import { LaunchRunForm } from "@/components/launch-run-form";
@@ -13,7 +14,13 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   await requirePageSession();
-  const [templates, runs, governance, browserProfiles] = await Promise.all([listTemplates(), listRuns(), getGovernanceStatus(), listBrowserProfiles()]);
+  const [templates, runs, governance, browserProfiles, aiConnections] = await Promise.all([
+    listTemplates(),
+    listRuns(),
+    getGovernanceStatus(),
+    listBrowserProfiles(),
+    listAiConnections(),
+  ]);
   const totalRuns = runs.length;
   const runningRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length;
   const persistentRuns = runs.filter((run) => run.lifecycle === "persistent").length;
@@ -99,7 +106,7 @@ export default async function HomePage() {
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.95fr]">
         <ActionBoard runs={runs} governance={governance} />
-        <LaunchRunForm templates={templates} governance={governance.settings} browserProfiles={browserProfiles} />
+        <LaunchRunForm templates={templates} governance={governance.settings} browserProfiles={browserProfiles} aiConnections={aiConnections} />
       </section>
 
       <section className="space-y-4">

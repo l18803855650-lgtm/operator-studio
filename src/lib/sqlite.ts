@@ -75,6 +75,7 @@ const DEFAULT_GOVERNANCE_SETTINGS: GovernanceSettings = {
   browserDefaultModel: "openai-codex/gpt-5.4",
   mediaDefaultModel: "minimax/MiniMax-M2.7-highspeed",
   factoryDefaultModel: "openai-codex/gpt-5.4",
+  defaultAiConnectionId: null,
 };
 
 export function getDefaultGovernanceSettings(): GovernanceSettings {
@@ -205,6 +206,7 @@ async function initializeDatabase(db: SqliteDatabase) {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;
 
     CREATE TABLE IF NOT EXISTS runs (
       id TEXT PRIMARY KEY,
@@ -308,6 +310,19 @@ async function initializeDatabase(db: SqliteDatabase) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ai_connections (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      base_url TEXT NOT NULL,
+      api_key_encrypted TEXT NOT NULL,
+      model TEXT NOT NULL,
+      notes TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   ensureColumn(db, "runs", "status", "TEXT");
@@ -328,6 +343,8 @@ async function initializeDatabase(db: SqliteDatabase) {
 
   ensureColumn(db, "browser_profiles", "secrets_json", "TEXT");
   ensureColumn(db, "browser_profiles", "totp_json", "TEXT");
+  ensureColumn(db, "ai_connections", "notes", "TEXT");
+  ensureColumn(db, "ai_connections", "enabled", "INTEGER NOT NULL DEFAULT 1");
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
@@ -369,6 +386,7 @@ export async function getDb(): Promise<SqliteDatabase> {
   if (!global.__operatorStudioDb) {
     fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
     global.__operatorStudioDb = new DatabaseSync(config.dbPath);
+    global.__operatorStudioDb.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   }
 
   const marker = globalThis as GlobalWithBootstrap;

@@ -9,6 +9,7 @@ export interface GovernanceSettings {
   browserDefaultModel: string;
   mediaDefaultModel: string;
   factoryDefaultModel: string;
+  defaultAiConnectionId: string | null;
 }
 
 export interface GovernanceStatus {

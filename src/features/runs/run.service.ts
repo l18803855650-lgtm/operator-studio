@@ -226,6 +226,8 @@ function normalizeExecutionInput(templateId: string, target: string, rawInput: R
       visionBatchWebhookRetries: typeof next.visionBatchWebhookRetries === "number" ? next.visionBatchWebhookRetries : 1,
       visionBatchWebhookBackoffMs: typeof next.visionBatchWebhookBackoffMs === "number" ? next.visionBatchWebhookBackoffMs : 700,
       visionBatchMaxImages: typeof next.visionBatchMaxImages === "number" ? next.visionBatchMaxImages : 6,
+      aiConnectionId: typeof next.aiConnectionId === "string" ? next.aiConnectionId : undefined,
+      visionProviderConnectionId: typeof next.visionProviderConnectionId === "string" ? next.visionProviderConnectionId : undefined,
       note: typeof next.note === "string" ? next.note : undefined,
     } satisfies Record<string, unknown>;
   }

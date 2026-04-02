@@ -21,9 +21,43 @@ function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
 function fileExists(filePath) { try { fs.accessSync(filePath); return true; } catch { return false; } }
 function isUrl(value) { return /^https?:\/\//i.test(String(value || '')); }
 
+const localSecretFilePath = path.join(dataDir, 'operator-studio.secret');
+let cachedSecretKey = null;
+
+function deriveSecretKey(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest();
+}
+
+function getSecretKey() {
+  if (cachedSecretKey) return cachedSecretKey;
+  if (process.env.OPERATOR_SECRET_KEY) {
+    cachedSecretKey = deriveSecretKey(process.env.OPERATOR_SECRET_KEY);
+    return cachedSecretKey;
+  }
+  ensureDir(path.dirname(localSecretFilePath));
+  if (!fileExists(localSecretFilePath)) {
+    fs.writeFileSync(localSecretFilePath, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  }
+  const raw = fs.readFileSync(localSecretFilePath, 'utf8').trim();
+  cachedSecretKey = /^[a-f0-9]{64}$/i.test(raw)
+    ? Buffer.from(raw, 'hex')
+    : (/^[A-Za-z0-9+/=]+$/.test(raw) ? Buffer.from(raw, 'base64') : deriveSecretKey(raw));
+  return cachedSecretKey;
+}
+
+function decryptSecret(payload) {
+  const buffer = Buffer.from(String(payload || ''), 'base64');
+  const iv = buffer.subarray(0, 12);
+  const tag = buffer.subarray(12, 28);
+  const body = buffer.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getSecretKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+}
+
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
 function getColumns(table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((item) => String(item.name || ''));
@@ -110,6 +144,18 @@ function bootstrapSchema() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS ai_connections (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      base_url TEXT NOT NULL,
+      api_key_encrypted TEXT NOT NULL,
+      model TEXT NOT NULL,
+      notes TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   ensureColumn('runs', 'status', 'TEXT');
@@ -130,6 +176,8 @@ function bootstrapSchema() {
 
   ensureColumn('browser_profiles', 'secrets_json', 'TEXT');
   ensureColumn('browser_profiles', 'totp_json', 'TEXT');
+  ensureColumn('ai_connections', 'notes', 'TEXT');
+  ensureColumn('ai_connections', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
 
   db.exec(`
     UPDATE runs
@@ -168,6 +216,7 @@ function bootstrapSchema() {
         browserDefaultModel: 'openai-codex/gpt-5.4',
         mediaDefaultModel: 'minimax/MiniMax-M2.7-highspeed',
         factoryDefaultModel: 'openai-codex/gpt-5.4',
+        defaultAiConnectionId: null,
       }),
       nowIso(),
     );
@@ -182,6 +231,7 @@ function getGovernance() {
     workerPollIntervalMs: 1200,
     maxConcurrentRuns: 3,
     visualVerificationRequired: true,
+    defaultAiConnectionId: null,
   };
   if (!row || !row.value_json) return defaults;
   try {
@@ -189,6 +239,207 @@ function getGovernance() {
   } catch {
     return defaults;
   }
+}
+
+function getAiConnectionById(connectionId) {
+  if (!connectionId) return null;
+  const record = row(db.prepare(`
+    SELECT id, name, provider, base_url, api_key_encrypted, model, notes, enabled, created_at, updated_at
+    FROM ai_connections
+    WHERE id = ?
+  `).get(String(connectionId)));
+  if (!record) return null;
+  return {
+    id: record.id,
+    name: record.name,
+    provider: record.provider,
+    baseUrl: record.base_url,
+    apiKey: decryptSecret(record.api_key_encrypted),
+    model: record.model,
+    notes: record.notes || null,
+    enabled: Boolean(record.enabled),
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  };
+}
+
+function resolveAiConnection(input) {
+  const explicitId = typeof input?.aiConnectionId === 'string' && input.aiConnectionId.trim()
+    ? input.aiConnectionId.trim()
+    : (typeof input?.visionProviderConnectionId === 'string' && input.visionProviderConnectionId.trim()
+      ? input.visionProviderConnectionId.trim()
+      : null);
+  if (explicitId) {
+    const explicitConnection = getAiConnectionById(explicitId);
+    if (!explicitConnection) throw new Error(`AI connection not found: ${explicitId}`);
+    if (!explicitConnection.enabled) throw new Error(`AI connection disabled: ${explicitId}`);
+    return explicitConnection;
+  }
+  const governance = getGovernance();
+  const defaultId = typeof governance.defaultAiConnectionId === 'string' && governance.defaultAiConnectionId.trim()
+    ? governance.defaultAiConnectionId.trim()
+    : null;
+  if (!defaultId) return null;
+  const defaultConnection = getAiConnectionById(defaultId);
+  if (!defaultConnection || !defaultConnection.enabled) return null;
+  return defaultConnection;
+}
+
+function normalizeChatCompletionsUrl(baseUrl) {
+  const normalized = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!normalized) throw new Error('AI connection 缺少 baseUrl');
+  if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  return `${normalized}/chat/completions`;
+}
+
+function extractTextFromMessageContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object' && typeof item.text === 'string') return item.text;
+      if (item && typeof item === 'object' && typeof item.content === 'string') return item.content;
+      return '';
+    }).filter(Boolean).join('\n');
+  }
+  if (content && typeof content === 'object' && typeof content.text === 'string') return content.text;
+  return '';
+}
+
+function parseJsonLikeText(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {}
+  }
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return JSON.parse(text.slice(firstBracket, lastBracket + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
+function extractOpenAiCompatibleJson(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    if ('summary' in value || 'findings' in value || 'comparisons' in value) return value;
+    const content = value.choices?.[0]?.message?.content
+      || value.output_text
+      || value.message?.content
+      || value.content
+      || null;
+    const parsed = parseJsonLikeText(extractTextFromMessageContent(content));
+    if (parsed) return parsed;
+  }
+  if (typeof value === 'string') return parseJsonLikeText(value);
+  return null;
+}
+
+async function callAiConnectionForVision(connection, messages, retryOptions = {}) {
+  const response = await postJson(normalizeChatCompletionsUrl(connection.baseUrl), {
+    model: connection.model,
+    messages,
+    temperature: 0.2,
+  }, {
+    Authorization: `Bearer ${connection.apiKey}`,
+  }, {
+    retries: retryOptions.retries,
+    backoffMs: retryOptions.backoffMs,
+    label: `ai connection ${connection.name}`,
+  });
+  if (!response.ok) {
+    const detail = typeof response.body?.error?.message === 'string'
+      ? response.body.error.message
+      : JSON.stringify(response.body);
+    throw new Error(`AI connection request failed: ${response.status} ${detail}`);
+  }
+  const extracted = extractOpenAiCompatibleJson(response.body);
+  if (!extracted || typeof extracted !== 'object') {
+    throw new Error(`AI connection did not return JSON content: ${JSON.stringify(response.body)}`);
+  }
+  return {
+    provider: 'ai-connection',
+    connectionId: connection.id,
+    connectionName: connection.name,
+    model: connection.model,
+    status: response.status,
+    attempts: response.attempts,
+    body: extracted,
+    raw: response.body,
+  };
+}
+
+function ensureFactorySingleVisionSummaryShape(value) {
+  const payload = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const findings = Array.isArray(payload.findings) ? payload.findings : [];
+  return {
+    summary: typeof payload.summary === 'string' && payload.summary.trim()
+      ? payload.summary.trim()
+      : (typeof payload.description === 'string' && payload.description.trim()
+        ? payload.description.trim()
+        : '已完成单图理解，但没有返回明确摘要。'),
+    findings: findings.map((item, index) => ({
+      id: item.id || null,
+      title: item.title || item.issue || `自动识别问题 ${index + 1}`,
+      severity: normalizeSeverity(item.severity),
+      recommendation: item.recommendation || item.action || '请结合现场人工复核并补充整改动作。',
+      standardCode: item.standardCode || item.standard || null,
+      observation: item.observation || item.currentState || item.note || null,
+      risk: item.risk || null,
+      owner: item.owner || null,
+      dueDate: item.dueDate || null,
+      effort: item.effort || 'medium',
+    })),
+  };
+}
+
+function ensureFactoryBatchVisionShape(value) {
+  const payload = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const findings = Array.isArray(payload.findings) ? payload.findings : [];
+  const comparisons = Array.isArray(payload.comparisons)
+    ? payload.comparisons.map((item) => String(item)).filter(Boolean)
+    : [];
+  return {
+    summary: typeof payload.summary === 'string' && payload.summary.trim()
+      ? payload.summary.trim()
+      : '已完成多图联合理解，但没有返回明确摘要。',
+    comparisons,
+    findings: findings.map((item, index) => ({
+      id: item.id || null,
+      title: item.title || item.issue || `跨图联合判断 ${index + 1}`,
+      severity: normalizeSeverity(item.severity),
+      recommendation: item.recommendation || item.action || '请结合跨图结论安排现场复核与整改。',
+      standardCode: item.standardCode || item.standard || null,
+      observation: item.observation || item.currentState || item.note || null,
+      risk: item.risk || null,
+      owner: item.owner || null,
+      dueDate: item.dueDate || null,
+      effort: item.effort || 'medium',
+      evidenceIds: Array.isArray(item.evidenceIds)
+        ? item.evidenceIds.map((entry) => String(entry)).filter(Boolean)
+        : (item.evidence ? String(item.evidence).split(',').map((entry) => entry.trim()).filter(Boolean) : []),
+    })),
+  };
 }
 
 function heartbeat() {
@@ -1393,7 +1644,7 @@ async function postJson(url, payload, headers = {}, retryOptions = {}) {
   }, {
     retries: retryOptions.retries,
     backoffMs: retryOptions.backoffMs,
-    label: 'media webhook',
+    label: retryOptions.label || 'json post',
   });
   const text = await response.text();
   return {
@@ -1765,75 +2016,122 @@ function inspectFactoryEvidence(filePath) {
 }
 
 async function analyzeFactoryEvidenceWithVision(run, evidenceItem, input) {
-  if (!input?.visionWebhookUrl) return null;
-  const webhookUrl = String(input.visionWebhookUrl || '');
-  if (!/^https?:\/\//i.test(webhookUrl)) {
-    throw new Error('factory visionWebhookUrl 必须是 http/https URL');
+  if (input?.visionWebhookUrl) {
+    const webhookUrl = String(input.visionWebhookUrl || '');
+    if (!/^https?:\/\//i.test(webhookUrl)) {
+      throw new Error('factory visionWebhookUrl 必须是 http/https URL');
+    }
+    const payload = {
+      runId: run.id,
+      traceId: run.trace_id,
+      evidenceId: evidenceItem.id,
+      fileName: evidenceItem.fileName,
+      mimeType: evidenceItem.mimeType,
+      sha256: evidenceItem.sha256,
+      image: evidenceItem.image || null,
+      base64: fs.readFileSync(evidenceItem.copiedPath).toString('base64'),
+    };
+    const response = await postJson(webhookUrl, payload, normalizeHeaderMap(input.visionWebhookHeaders) || {}, {
+      retries: Number(input.visionWebhookRetries || 0),
+      backoffMs: Number(input.visionWebhookBackoffMs || 500),
+    });
+    if (!response.ok) {
+      throw new Error(`factory vision webhook failed: ${response.status}`);
+    }
+    return {
+      provider: 'vision-webhook',
+      status: response.status,
+      attempts: response.attempts,
+      body: ensureFactorySingleVisionSummaryShape(response.body),
+    };
   }
-  const payload = {
-    runId: run.id,
-    traceId: run.trace_id,
-    evidenceId: evidenceItem.id,
-    fileName: evidenceItem.fileName,
-    mimeType: evidenceItem.mimeType,
-    sha256: evidenceItem.sha256,
-    image: evidenceItem.image || null,
-    base64: fs.readFileSync(evidenceItem.copiedPath).toString('base64'),
-  };
-  const response = await postJson(webhookUrl, payload, normalizeHeaderMap(input.visionWebhookHeaders) || {}, {
+
+  const connection = resolveAiConnection(input);
+  if (!connection) return null;
+  const mimeType = String(evidenceItem.mimeType || 'image/png');
+  const imageBase64 = fs.readFileSync(evidenceItem.copiedPath).toString('base64');
+  const result = await callAiConnectionForVision(connection, [
+    {
+      role: 'system',
+      content: '你是生产线审计助手。请只输出 JSON，格式为 {"summary": string, "findings": [{"title": string, "severity": "P0|P1|P2|P3", "recommendation": string, "standardCode": string|null, "observation": string|null}]}。如果没有明确问题，也返回 summary 且 findings 为空数组。',
+    },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: `请分析这张工厂/产线审计图片。上下文：site=${input.site || run.target}; line=${input.lineName || input.site || run.target}; evidenceId=${evidenceItem.id}; fileName=${evidenceItem.fileName}` },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+      ],
+    },
+  ], {
     retries: Number(input.visionWebhookRetries || 0),
-    backoffMs: Number(input.visionWebhookBackoffMs || 500),
+    backoffMs: Number(input.visionWebhookBackoffMs || 700),
   });
-  if (!response.ok) {
-    throw new Error(`factory vision webhook failed: ${response.status}`);
-  }
-  return {
-    provider: 'vision-webhook',
-    status: response.status,
-    attempts: response.attempts,
-    body: response.body,
-  };
+  return { ...result, body: ensureFactorySingleVisionSummaryShape(result.body) };
 }
 
 async function analyzeFactoryBatchWithVision(run, evidenceIndex, input) {
-  if (!input?.visionBatchWebhookUrl) return null;
-  const webhookUrl = String(input.visionBatchWebhookUrl || '');
-  if (!/^https?:\/\//i.test(webhookUrl)) {
-    throw new Error('factory visionBatchWebhookUrl 必须是 http/https URL');
-  }
   const maxImages = Math.max(2, Math.min(12, Number(input.visionBatchMaxImages || 6)));
   const imageEvidence = evidenceIndex
     .filter((item) => item && typeof item === 'object' && String(item.mimeType || '').startsWith('image/'))
     .slice(0, maxImages);
   if (imageEvidence.length < 2) return null;
-  const payload = {
-    runId: run.id,
-    traceId: run.trace_id,
-    evidenceCount: imageEvidence.length,
-    items: imageEvidence.map((item) => ({
-      evidenceId: item.id,
-      fileName: item.fileName,
-      mimeType: item.mimeType,
-      sha256: item.sha256,
-      image: item.image || null,
-      summary: item.vision?.body?.summary || null,
-      base64: fs.readFileSync(item.copiedPath).toString('base64'),
-    })),
-  };
-  const response = await postJson(webhookUrl, payload, normalizeHeaderMap(input.visionBatchWebhookHeaders) || {}, {
-    retries: Number(input.visionBatchWebhookRetries || 0),
-    backoffMs: Number(input.visionBatchWebhookBackoffMs || 700),
-  });
-  if (!response.ok) {
-    throw new Error(`factory vision batch webhook failed: ${response.status}`);
+
+  if (input?.visionBatchWebhookUrl) {
+    const webhookUrl = String(input.visionBatchWebhookUrl || '');
+    if (!/^https?:\/\//i.test(webhookUrl)) {
+      throw new Error('factory visionBatchWebhookUrl 必须是 http/https URL');
+    }
+    const payload = {
+      runId: run.id,
+      traceId: run.trace_id,
+      evidenceCount: imageEvidence.length,
+      items: imageEvidence.map((item) => ({
+        evidenceId: item.id,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        sha256: item.sha256,
+        image: item.image || null,
+        summary: item.vision?.body?.summary || null,
+        base64: fs.readFileSync(item.copiedPath).toString('base64'),
+      })),
+    };
+    const response = await postJson(webhookUrl, payload, normalizeHeaderMap(input.visionBatchWebhookHeaders) || {}, {
+      retries: Number(input.visionBatchWebhookRetries || 0),
+      backoffMs: Number(input.visionBatchWebhookBackoffMs || 700),
+    });
+    if (!response.ok) {
+      throw new Error(`factory vision batch webhook failed: ${response.status}`);
+    }
+    return {
+      provider: 'vision-batch-webhook',
+      status: response.status,
+      attempts: response.attempts,
+      imagesCount: imageEvidence.length,
+      body: ensureFactoryBatchVisionShape(response.body),
+    };
   }
-  return {
-    provider: 'vision-batch-webhook',
-    status: response.status,
-    attempts: response.attempts,
-    imagesCount: imageEvidence.length,
-    body: response.body,
-  };
+
+  const connection = resolveAiConnection(input);
+  if (!connection) return null;
+  const userContent = [{ type: 'text', text: `请做多图联合理解。上下文：site=${input.site || run.target}; line=${input.lineName || input.site || run.target}。请只输出 JSON，格式为 {"summary": string, "comparisons": string[], "findings": [{"title": string, "severity": "P0|P1|P2|P3", "recommendation": string, "standardCode": string|null, "observation": string|null, "evidenceIds": string[]}] }。重点识别跨图共性问题、差异点、优先级。` }];
+  imageEvidence.forEach((item) => {
+    userContent.push({ type: 'text', text: `图片 ${item.id} (${item.fileName}) 已有单图摘要：${item.vision?.body?.summary || '无'}` });
+    userContent.push({ type: 'image_url', image_url: { url: `data:${item.mimeType || 'image/png'};base64,${fs.readFileSync(item.copiedPath).toString('base64')}` } });
+  });
+  const result = await callAiConnectionForVision(connection, [
+    {
+      role: 'system',
+      content: '你是生产线审计助手，擅长跨图联合判断和整改优先级整理。返回 JSON，不要输出 markdown。',
+    },
+    {
+      role: 'user',
+      content: userContent,
+    },
+  ], {
+    retries: Number(input.visionBatchWebhookRetries || 0),
+    backoffMs: Number(input.visionBatchWebhookBackoffMs || 900),
+  });
+  return { ...result, imagesCount: imageEvidence.length, body: ensureFactoryBatchVisionShape(result.body) };
 }
 
 function isEmbeddableEvidenceImage(item) {

@@ -2,11 +2,12 @@ import { ValidationError } from "@/lib/errors";
 import { getGovernanceSettingsRecord, getWorkerHeartbeatRecord, patchGovernanceSettingsRecord } from "./governance.repository";
 import type { GovernanceSettings, GovernanceStatus } from "./governance.types";
 
+export async function getGovernanceSettings(): Promise<GovernanceSettings> {
+  return getGovernanceSettingsRecord();
+}
+
 export async function getGovernanceStatus(): Promise<GovernanceStatus> {
-  const [settings, heartbeat] = await Promise.all([
-    getGovernanceSettingsRecord(),
-    getWorkerHeartbeatRecord(),
-  ]);
+  const [settings, heartbeat] = await Promise.all([getGovernanceSettingsRecord(), getWorkerHeartbeatRecord()]);
 
   if (!heartbeat?.heartbeatAt) {
     return {
@@ -37,7 +38,20 @@ export async function updateGovernanceSettings(patch: Partial<GovernanceSettings
   if (patch.dailyRunBudget !== undefined && patch.dailyRunBudget < 1) {
     throw new ValidationError("dailyRunBudget must be >= 1");
   }
+  if (patch.defaultAiConnectionId !== undefined && patch.defaultAiConnectionId !== null && typeof patch.defaultAiConnectionId !== "string") {
+    throw new ValidationError("defaultAiConnectionId must be string | null");
+  }
 
-  await patchGovernanceSettingsRecord(patch);
+  const normalizedPatch: Partial<GovernanceSettings> = {
+    ...patch,
+    defaultAiConnectionId:
+      patch.defaultAiConnectionId === undefined
+        ? undefined
+        : patch.defaultAiConnectionId && patch.defaultAiConnectionId.trim().length > 0
+          ? patch.defaultAiConnectionId.trim()
+          : null,
+  };
+
+  await patchGovernanceSettingsRecord(normalizedPatch);
   return getGovernanceStatus();
 }

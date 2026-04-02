@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ExecutionTemplate } from "@/features/templates/template.types";
+import type { BrowserProfileRecord } from "@/features/browser-profiles/browser-profile.types";
+import type { AiConnectionRecord } from "@/features/ai-connections/ai-connection.types";
 import type { GovernanceSettings } from "@/features/governance/governance.types";
 import type { RunView } from "@/features/runs/run.types";
-import type { BrowserProfileRecord } from "@/features/browser-profiles/browser-profile.types";
+import type { ExecutionTemplate } from "@/features/templates/template.types";
 import { domainMeta, lifecycleMeta } from "@/lib/presenter";
 
 const targetSuggestions: Record<string, string[]> = {
@@ -25,7 +26,7 @@ const executionInputDefaults: Record<string, string> = {
       persistProfileStorageState: true,
       secrets: {
         username: "demo",
-        password: "secret"
+        password: "secret",
       },
       totp: {
         secret: "JBSWY3DPEHPK3PXP",
@@ -33,7 +34,7 @@ const executionInputDefaults: Record<string, string> = {
         accountName: "demo",
         digits: 6,
         period: 30,
-        algorithm: "SHA1"
+        algorithm: "SHA1",
       },
       actions: [
         { type: "fillSecret", selector: "#username", key: "username", label: "填用户名" },
@@ -45,9 +46,9 @@ const executionInputDefaults: Record<string, string> = {
         { type: "click", selector: "button[type='submit']", label: "提交 OTP" },
         { type: "waitForUrl", expected: "/dashboard", label: "等待进入后台" },
         { type: "saveProfileStorageState", label: "回写 profile 登录态" },
-        { type: "screenshot", label: "后台截图", fullPage: true }
+        { type: "screenshot", label: "后台截图", fullPage: true },
       ],
-      note: "支持复杂登录流、多步跳转、secrets/TOTP、storage state 回写、多页面切换、下载留痕和 replay。"
+      note: "支持复杂登录流、多步跳转、secrets/TOTP、storage state 回写、多页面切换、下载留痕和 replay。",
     },
     null,
     2,
@@ -58,25 +59,25 @@ const executionInputDefaults: Record<string, string> = {
       archiveName: "operator-media-smoke.wav",
       extractFrame: true,
       sourceHeaders: {
-        "x-media-auth": "token"
+        "x-media-auth": "token",
       },
       sourceCookies: [
         {
           name: "media_token",
-          value: "demo"
-        }
+          value: "demo",
+        },
       ],
       sourceRetries: 2,
       sourceBackoffMs: 600,
       deliveryDir: "/tmp/operator-media-delivery",
       deliveryWebhookUrl: "https://example.com/operator-webhook",
       deliveryWebhookHeaders: {
-        "x-operator-source": "operator-studio"
+        "x-operator-source": "operator-studio",
       },
       deliveryWebhookRetries: 2,
       deliveryWebhookBackoffMs: 600,
       emitChecksums: true,
-      note: "支持鉴权拉取、归档、probe、checksum manifest、replay，并可投递到本地目录或 webhook。"
+      note: "支持鉴权拉取、归档、probe、checksum manifest、replay，并可投递到本地目录或 webhook。",
     },
     null,
     2,
@@ -92,20 +93,14 @@ const executionInputDefaults: Record<string, string> = {
           title: "人员进入工位前未确认手环接地",
           severity: "P0",
           standardCode: "ESD-GROUND",
-          recommendation: "上线前强制做手环测试并记录责任人。"
-        }
+          recommendation: "上线前强制做手环测试并记录责任人。",
+        },
       ],
-      checklist: [
-        "工位标识清晰",
-        "静电防护流程可追溯"
-      ],
+      checklist: ["工位标识清晰", "静电防护流程可追溯"],
       exportDir: "/tmp/operator-factory-export",
       exportPptx: true,
       presentationTitle: "ESD 包装线审计汇报版",
-      visionWebhookUrl: "https://example.com/factory-vision-single",
-      visionBatchWebhookUrl: "https://example.com/factory-vision-batch",
-      visionBatchMaxImages: 6,
-      note: "支持单图 vision、多图联合理解、证据元数据、问题点、标准映射、优先级排序和 HTML/Markdown/PPTX 审计导出。"
+      note: "如果治理页已设默认 AI 连接，这里可以不再手填 aiConnectionId；也支持继续走单图 / 多图 webhook。",
     },
     null,
     2,
@@ -116,10 +111,12 @@ export function LaunchRunForm({
   templates,
   governance,
   browserProfiles,
+  aiConnections,
 }: {
   templates: ExecutionTemplate[];
   governance: GovernanceSettings;
   browserProfiles: BrowserProfileRecord[];
+  aiConnections: AiConnectionRecord[];
 }) {
   const [templateId, setTemplateId] = useState<string>(templates[0]?.id ?? "");
   const [title, setTitle] = useState("");
@@ -130,15 +127,24 @@ export function LaunchRunForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [selectedAiConnectionId, setSelectedAiConnectionId] = useState("");
 
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === templateId) ?? templates[0],
     [templateId, templates],
   );
 
+  const defaultAiConnection = useMemo(
+    () => aiConnections.find((connection) => connection.id === governance.defaultAiConnectionId) ?? null,
+    [aiConnections, governance.defaultAiConnectionId],
+  );
+
   useEffect(() => {
     if (!selectedTemplate) return;
     setExecutionInput(executionInputDefaults[selectedTemplate.id] ?? "{}");
+    setSelectedProfileId("");
+    setSelectedAiConnectionId("");
+    setError(null);
     const firstSuggestion = targetSuggestions[selectedTemplate.id]?.[0];
     if (firstSuggestion) setTarget(firstSuggestion);
   }, [selectedTemplate]);
@@ -147,15 +153,30 @@ export function LaunchRunForm({
   const domain = selectedTemplate ? domainMeta[selectedTemplate.domain] : null;
   const lifecycleInfo = lifecycleMeta[lifecycle];
 
+  function patchExecutionInput(mutator: (draft: Record<string, unknown>) => void, errorMessage: string) {
+    try {
+      const parsed = executionInput.trim() ? (JSON.parse(executionInput) as Record<string, unknown>) : {};
+      mutator(parsed);
+      setExecutionInput(JSON.stringify(parsed, null, 2));
+      setError(null);
+    } catch {
+      setError(errorMessage);
+    }
+  }
+
   function injectCredentialProfile() {
     if (!selectedProfileId) return;
-    try {
-      const parsed = executionInput.trim() ? JSON.parse(executionInput) as Record<string, unknown> : {};
+    patchExecutionInput((parsed) => {
       parsed.credentialProfileId = selectedProfileId;
-      setExecutionInput(JSON.stringify(parsed, null, 2));
-    } catch {
-      setError("当前 executor 输入 JSON 不合法，无法注入 credentialProfileId");
-    }
+    }, "当前 executor 输入 JSON 不合法，无法注入 credentialProfileId");
+  }
+
+  function applyAiConnection(connectionId: string) {
+    setSelectedAiConnectionId(connectionId);
+    patchExecutionInput((parsed) => {
+      if (connectionId) parsed.aiConnectionId = connectionId;
+      else delete parsed.aiConnectionId;
+    }, "当前 executor 输入 JSON 不合法，无法自动写入 aiConnectionId");
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -184,8 +205,10 @@ export function LaunchRunForm({
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="section-kicker">Launch new run</div>
-          <h3 className="mt-2 text-2xl font-bold text-slate-950">发起一个真正可追的执行 run</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-500">这版不只选模板和写目标，还能把 executor 输入直接带进去，让 browser / media / factory 三条链路都走真实执行。</p>
+          <h3 className="mt-2 text-2xl font-bold text-slate-950">发起一个真实会跑的任务</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            不只是选模板。这里会把目标、默认规则、凭据资料和执行输入一起收口，让 browser / media / factory 真正跑起来。
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className={`badge ${lifecycleInfo.badgeClass}`}>{lifecycleInfo.label}</span>
@@ -201,7 +224,9 @@ export function LaunchRunForm({
               模板
               <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="input-shell">
                 {templates.map((template) => (
-                  <option key={template.id} value={template.id}>{template.name}</option>
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -220,7 +245,7 @@ export function LaunchRunForm({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="input-shell"
-              placeholder="例如：夜间收口真实 browser executor / 媒体下载归档 smoke"
+              placeholder="例如：夜间收口 browser 登录验收 / 工厂审计输出 PPT"
             />
           </label>
 
@@ -237,12 +262,7 @@ export function LaunchRunForm({
           {templateSuggestions.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {templateSuggestions.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setTarget(item)}
-                  className="pill-button"
-                >
+                <button key={item} type="button" onClick={() => setTarget(item)} className="pill-button">
                   {item}
                 </button>
               ))}
@@ -256,13 +276,41 @@ export function LaunchRunForm({
                 <select value={selectedProfileId} onChange={(e) => setSelectedProfileId(e.target.value)} className="input-shell">
                   <option value="">不使用 profile（直接吃下方 JSON）</option>
                   {browserProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>{profile.name}</option>
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
                   ))}
                 </select>
               </label>
-              <button type="button" onClick={injectCredentialProfile} disabled={!selectedProfileId} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+              <button
+                type="button"
+                onClick={injectCredentialProfile}
+                disabled={!selectedProfileId}
+                className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 注入 credentialProfileId
               </button>
+            </div>
+          ) : null}
+
+          {selectedTemplate?.id === "factory-audit" ? (
+            <div className="space-y-3 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Factory 图片理解连接
+                <select value={selectedAiConnectionId} onChange={(e) => applyAiConnection(e.target.value)} className="input-shell">
+                  <option value="">
+                    跟随治理默认（{defaultAiConnection ? `${defaultAiConnection.name} / ${defaultAiConnection.model}` : "当前未设置"}）
+                  </option>
+                  {aiConnections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name} / {connection.model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="text-sm leading-6 text-slate-500">
+                不想手改 JSON，直接在这里选。系统会自动写入或移除 <code>aiConnectionId</code>；如果留空，就走治理页里的默认连接。
+              </div>
             </div>
           ) : null}
 
@@ -272,7 +320,7 @@ export function LaunchRunForm({
               value={executionInput}
               onChange={(e) => setExecutionInput(e.target.value)}
               className="textarea-shell min-h-[180px] font-mono text-xs"
-              placeholder='例如：{"url":"https://example.com/login","credentialProfileId":"...","persistProfileStorageState":true} / {"source":"https://...","sourceHeaders":{...},"deliveryWebhookUrl":"https://..."} / {"site":"ESD 产线","exportPptx":true,"visionWebhookUrl":"https://...","visionBatchWebhookUrl":"https://..."}'
+              placeholder='例如：{"url":"https://example.com/login","credentialProfileId":"...","persistProfileStorageState":true} / {"source":"https://...","sourceHeaders":{...},"deliveryWebhookUrl":"https://..."} / {"site":"ESD 产线","exportPptx":true}'
             />
           </label>
 
@@ -292,7 +340,10 @@ export function LaunchRunForm({
             <div className="text-sm leading-6 text-slate-500">
               当前治理默认：{governance.defaultLifecycle === "persistent" ? "常驻" : "临时"} / 并发 {governance.maxConcurrentRuns} / 轮询 {governance.workerPollIntervalMs}ms
             </div>
-            <button disabled={submitting} className="rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60">
+            <button
+              disabled={submitting}
+              className="rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
               {submitting ? "创建中..." : "启动 run"}
             </button>
           </div>
@@ -317,14 +368,16 @@ export function LaunchRunForm({
                 ? "真实打开 URL，支持复杂登录流、DOM action DSL、Header/Cookie/basicAuth/storageStatePath 注入、secrets/TOTP、多页面切换、下载留痕和会话回写。"
                 : selectedTemplate?.id === "media-agent"
                   ? "真实拉取或归档媒体输入，支持鉴权 header/cookie、重试、checksum manifest、replay，并可投递到本地目录或 webhook。"
-                  : "真实收口审计证据、单图+多图联合理解、标准映射、优先级、HTML/Markdown/PPTX 报告和 replay 包。"}
+                  : `真实收口审计证据、单图+多图联合理解、标准映射、优先级、HTML/Markdown/PPTX 报告和 replay 包；${defaultAiConnection ? `当前治理默认 AI 连接是 ${defaultAiConnection.name} / ${defaultAiConnection.model}。` : "如果治理页还没设默认 AI 连接，也可以在左侧直接指定一个。"}`}
             </div>
           </div>
           <div className="mt-4 space-y-3">
             {selectedTemplate?.steps.map((step, index) => (
               <div key={step.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-white">{index + 1}. {step.title}</div>
+                  <div className="text-sm font-semibold text-white">
+                    {index + 1}. {step.title}
+                  </div>
                   <div className="text-xs text-slate-400">~{step.durationSec}s</div>
                 </div>
                 <div className="mt-2 text-sm leading-6 text-slate-300">{step.description}</div>
@@ -332,9 +385,15 @@ export function LaunchRunForm({
             ))}
           </div>
           <div className="mt-4 rounded-2xl border border-brand-300/20 bg-brand-400/10 p-4 text-sm leading-6 text-slate-200">
-            <div>默认模型：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.defaultModel}</span></div>
-            <div className="mt-1">回退模型：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.fallbackModel}</span></div>
-            <div className="mt-1">验收方式：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.verification}</span></div>
+            <div>
+              默认模型：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.defaultModel}</span>
+            </div>
+            <div className="mt-1">
+              回退模型：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.fallbackModel}</span>
+            </div>
+            <div className="mt-1">
+              验收方式：<span className="font-semibold text-white">{selectedTemplate?.modelPolicy.verification}</span>
+            </div>
           </div>
         </div>
       </div>

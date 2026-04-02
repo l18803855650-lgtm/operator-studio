@@ -160,6 +160,7 @@ async function startSupportServer(mediaFilePath) {
     webhookCalls: 0,
     visionHits: [],
     visionBatchHits: [],
+    aiChatHits: [],
   };
 
   const server = http.createServer(async (req, res) => {
@@ -373,6 +374,63 @@ async function startSupportServer(mediaFilePath) {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        let body = null;
+        try { body = raw ? JSON.parse(raw) : null; } catch { body = raw; }
+        state.aiChatHits.push(body);
+        const joinedText = JSON.stringify(body || {});
+        const isBatch = joinedText.includes('多图联合理解');
+        const responsePayload = isBatch
+          ? {
+              summary: 'AI 连接多图联合理解确认：两处工位都出现 ESD 标识与测试留痕不一致的问题。',
+              comparisons: [
+                '两张图都出现 ESD 边界区域，但测试留痕不足。',
+                '一张图偏向工位标识缺口，另一张图偏向测试记录缺口。',
+              ],
+              findings: [
+                {
+                  title: '跨图联合判断：测试留痕与工位标识存在共性缺口',
+                  severity: 'P1',
+                  recommendation: '将工位标识核对与手环测试记录纳入同一张班前点检表。',
+                  standardCode: 'ESD-GROUND',
+                  evidenceIds: ['E01', 'E02'],
+                },
+              ],
+            }
+          : {
+              summary: 'AI 连接识别到 ESD 审计图像，提示需要复核工位标识与测试留痕。',
+              findings: [
+                {
+                  title: 'AI 连接识别：工位标识需要人工复核',
+                  severity: 'P2',
+                  recommendation: '复核工位边界框、看板与手环测试记录是否一致。',
+                  standardCode: '5S-HOUSEKEEPING',
+                  observation: '图像中存在明显的审计框和工位标识。',
+                },
+              ],
+            };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 'chatcmpl-smoke',
+          object: 'chat.completion',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: JSON.stringify(responsePayload),
+              },
+            },
+          ],
+        }));
+      });
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('not found');
   });
@@ -496,7 +554,22 @@ async function main() {
     const browserProfile = profileCreate.data.data;
 
     const mediaDeliveryDir = path.join(tmpDir, 'media-delivery');
+    const factoryAiExportDir = path.join(tmpDir, 'factory-export-ai');
     fs.mkdirSync(mediaDeliveryDir, { recursive: true });
+    fs.mkdirSync(factoryAiExportDir, { recursive: true });
+
+    const aiConnectionCreate = await request('POST', '/api/ai-connections', {
+      name: 'Smoke Direct Vision',
+      baseUrl: `${support.baseUrl}/v1`,
+      apiKey: 'smoke-direct-api-key',
+      model: 'gpt-4.1-mini',
+      notes: '用于 smoke 验证 direct AI connection vision',
+    });
+    if (aiConnectionCreate.status !== 201) throw new Error(`create ai connection failed: ${aiConnectionCreate.status} ${JSON.stringify(aiConnectionCreate.data)}`);
+    const aiConnection = aiConnectionCreate.data.data;
+
+    const governanceUpdate = await request('PATCH', '/api/governance', { defaultAiConnectionId: aiConnection.id });
+    if (governanceUpdate.status !== 200) throw new Error(`update governance default ai connection failed: ${governanceUpdate.status} ${JSON.stringify(governanceUpdate.data)}`);
 
     const browserCreate = await request('POST', '/api/runs', {
       templateId: 'browser-operator',
@@ -589,6 +662,25 @@ async function main() {
     if (factoryCreate.status !== 201) throw new Error(`create factory run failed: ${factoryCreate.status} ${JSON.stringify(factoryCreate.data)}`);
     const factoryRun = factoryCreate.data.data;
 
+    const factoryAiCreate = await request('POST', '/api/runs', {
+      templateId: 'factory-audit',
+      target: 'Smoke factory audit via ai connection',
+      lifecycle: 'temporary',
+      executionInput: JSON.stringify({
+        site: 'Smoke ESD line',
+        lineName: 'Line-2',
+        auditTitle: 'Smoke factory audit via ai connection',
+        owner: 'QA',
+        evidenceDir: factory.evidenceDir,
+        checklist: ['两处工位都需要检查手环测试留痕', '两处工位都需要核对边界标识'],
+        exportDir: factoryAiExportDir,
+        exportPptx: true,
+        presentationTitle: 'Smoke Factory Deck AI Connection',
+      }),
+    });
+    if (factoryAiCreate.status !== 201) throw new Error(`create direct factory run failed: ${factoryAiCreate.status} ${JSON.stringify(factoryAiCreate.data)}`);
+    const factoryAiRun = factoryAiCreate.data.data;
+
     const controlCreate = await request('POST', '/api/runs', {
       templateId: 'browser-operator',
       target: 'Smoke control run',
@@ -619,27 +711,32 @@ async function main() {
     const resumedControl = await request('PATCH', `/api/runs/${controlRun.id}`, { desiredState: 'active' });
     if (resumedControl.status !== 200) throw new Error(`resume control run failed: ${resumedControl.status} ${JSON.stringify(resumedControl.data)}`);
 
-    const [browserSnapshot, mediaSnapshot, factorySnapshot, controlSnapshot] = await Promise.all([
+    const [browserSnapshot, mediaSnapshot, factorySnapshot, factoryAiSnapshot, controlSnapshot] = await Promise.all([
       waitForRun(browserRun.id, 90000),
       waitForRun(mediaRun.id, 90000),
       waitForRun(factoryRun.id, 90000),
+      waitForRun(factoryAiRun.id, 90000),
       waitForRun(controlRun.id, 90000),
     ]);
 
-    const [browserArtifacts, mediaArtifacts, factoryArtifacts, controlArtifacts, controlEvents] = await Promise.all([
+    const [browserArtifacts, mediaArtifacts, factoryArtifacts, factoryAiArtifacts, controlArtifacts, controlEvents] = await Promise.all([
       getArtifacts(browserRun.id),
       getArtifacts(mediaRun.id),
       getArtifacts(factoryRun.id),
+      getArtifacts(factoryAiRun.id),
       getArtifacts(controlRun.id),
       getEvents(controlRun.id),
     ]);
 
     const browserActionArtifact = browserArtifacts.find((item) => item.label === 'Browser action log');
     const factoryIndexArtifact = factoryArtifacts.find((item) => item.label === 'Factory evidence index');
+    const factoryAiIndexArtifact = factoryAiArtifacts.find((item) => item.label === 'Factory evidence index');
     const browserActionDownload = browserActionArtifact ? await requestBuffer(`/api/runs/${browserRun.id}/artifacts/${browserActionArtifact.id}`) : null;
     const factoryIndexDownload = factoryIndexArtifact ? await requestBuffer(`/api/runs/${factoryRun.id}/artifacts/${factoryIndexArtifact.id}`) : null;
+    const factoryAiIndexDownload = factoryAiIndexArtifact ? await requestBuffer(`/api/runs/${factoryAiRun.id}/artifacts/${factoryAiIndexArtifact.id}`) : null;
     const browserActionLog = browserActionDownload ? JSON.parse(browserActionDownload.buffer.toString('utf8')) : null;
     const factoryEvidenceIndex = factoryIndexDownload ? JSON.parse(factoryIndexDownload.buffer.toString('utf8')) : null;
+    const factoryAiEvidenceIndex = factoryAiIndexDownload ? JSON.parse(factoryAiIndexDownload.buffer.toString('utf8')) : null;
     const profileStorageState = fs.existsSync(profileStorageStatePath)
       ? JSON.parse(fs.readFileSync(profileStorageStatePath, 'utf8'))
       : null;
@@ -667,6 +764,13 @@ async function main() {
         visionHits: support.state.visionHits.length,
         visionBatchHits: support.state.visionBatchHits.length,
       },
+      factoryDirectAi: {
+        runId: factoryAiRun.id,
+        status: factoryAiSnapshot?.status,
+        artifacts: factoryAiArtifacts.length,
+        artifactLabels: factoryAiArtifacts.slice(0, 12).map((item) => item.label),
+        aiChatHits: support.state.aiChatHits.length,
+      },
       control: {
         runId: controlRun.id,
         status: controlSnapshot?.status,
@@ -679,6 +783,7 @@ async function main() {
     if (browserSnapshot?.status !== 'completed') throw new Error(`browser smoke did not complete: ${JSON.stringify(result.browser)}`);
     if (mediaSnapshot?.status !== 'completed') throw new Error(`media smoke did not complete: ${JSON.stringify(result.media)}`);
     if (factorySnapshot?.status !== 'completed') throw new Error(`factory smoke did not complete: ${JSON.stringify(result.factory)}`);
+    if (factoryAiSnapshot?.status !== 'completed') throw new Error(`factory direct ai smoke did not complete: ${JSON.stringify(result.factoryDirectAi)}`);
     if (controlSnapshot?.status !== 'completed') throw new Error(`control smoke did not complete after resume: ${JSON.stringify(result.control)}`);
 
     if (!browserArtifacts.some((item) => item.kind === 'replay')) throw new Error(`browser smoke missing replay artifact: ${JSON.stringify(result.browser)}`);
@@ -710,6 +815,15 @@ async function main() {
     if (!factoryEvidenceIndex?.visionBatch?.summary) throw new Error(`factory smoke missing vision batch summary: ${JSON.stringify(factoryEvidenceIndex)}`);
     if (!factoryEvidenceIndex?.findings?.some((item) => String(item.title || '').includes('跨图联合判断'))) {
       throw new Error(`factory smoke missing auto findings from vision batch: ${JSON.stringify(factoryEvidenceIndex)}`);
+    }
+
+    if (!factoryAiArtifacts.some((item) => item.kind === 'replay')) throw new Error(`factory direct ai smoke missing replay artifact: ${JSON.stringify(result.factoryDirectAi)}`);
+    if (!factoryAiArtifacts.some((item) => item.label === 'Factory report pptx')) throw new Error(`factory direct ai smoke missing report pptx: ${JSON.stringify(result.factoryDirectAi)}`);
+    if (!fs.readdirSync(factoryAiExportDir).some((fileName) => fileName.endsWith('.pptx'))) throw new Error(`factory direct ai export dir missing pptx: ${factoryAiExportDir}`);
+    if (support.state.aiChatHits.length === 0) throw new Error(`factory direct ai smoke did not hit openai-compatible endpoint: ${JSON.stringify(result.factoryDirectAi)}`);
+    if (!factoryAiEvidenceIndex?.visionBatch?.summary) throw new Error(`factory direct ai smoke missing vision batch summary: ${JSON.stringify(factoryAiEvidenceIndex)}`);
+    if (!factoryAiEvidenceIndex?.findings?.some((item) => String(item.title || '').includes('跨图联合判断'))) {
+      throw new Error(`factory direct ai smoke missing auto findings from ai connection: ${JSON.stringify(factoryAiEvidenceIndex)}`);
     }
 
     if (!controlArtifacts.some((item) => item.kind === 'replay')) throw new Error(`control smoke missing replay artifact: ${JSON.stringify(result.control)}`);
