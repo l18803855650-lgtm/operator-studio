@@ -1,0 +1,28 @@
+{
+  "name": "operator-studio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3010",
+    "build": "next build",
+    "start": "next start -p 3010",
+    "worker": "node scripts/worker.js",
+    "smoke": "node scripts/smoke.js",
+    "verify": "npm run build && npm run smoke"
+  },
+  "dependencies": {
+    "next": "14.2.5",
+    "pptxgenjs": "^4.0.1",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
