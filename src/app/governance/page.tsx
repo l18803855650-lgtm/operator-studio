@@ -1,6 +1,4 @@
-import { GovernancePanel } from "@/components/governance-panel";
-import { AiConnectionsPanel } from "@/components/ai-connections-panel";
-import { BrowserProfilesPanel } from "@/components/browser-profiles-panel";
+import { SettingsTabs } from "@/components/settings-tabs";
 import { getGovernanceStatus } from "@/features/governance/governance.service";
 import { listBrowserProfiles } from "@/features/browser-profiles/browser-profile.service";
 import { listAiConnections } from "@/features/ai-connections/ai-connection.service";
@@ -23,14 +21,16 @@ export default async function GovernancePage() {
           <div className="section-kicker text-white/50">设置</div>
           <h1 className="mt-3 text-3xl font-black tracking-tight md:text-4xl">把复杂项放到这里</h1>
           <p className="mt-3 text-sm leading-7 text-slate-300">
-            首页只管发起和查看，这一页专门收默认规则、API 连接和登录资料。
+            首页只保留核心操作。这一页按标签拆开，不再把所有设置一次性摊满。
           </p>
         </div>
       </section>
 
-      <GovernancePanel initialSettings={governance.settings} aiConnections={aiConnections} />
-      <AiConnectionsPanel initialConnections={aiConnections} />
-      <BrowserProfilesPanel initialProfiles={browserProfiles} />
+      <SettingsTabs
+        initialSettings={governance.settings}
+        aiConnections={aiConnections}
+        browserProfiles={browserProfiles}
+      />
     </main>
   );
 }

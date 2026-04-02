@@ -35,18 +35,18 @@ export default async function HomePage() {
   return (
     <main className="page-shell space-y-6">
       <section className="section-card overflow-hidden p-6 md:p-8">
-        <div className="grid gap-6 xl:grid-cols-[1.3fr_0.9fr] xl:items-stretch">
+        <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr] xl:items-stretch">
           <div className="rounded-[28px] bg-slate-950 p-7 text-white">
             <div className="section-kicker text-white/55">工作台</div>
-            <h1 className="mt-3 text-3xl font-black tracking-tight md:text-[2.7rem]">
-              把任务交给系统，
-              <span className="text-brand-300">不是交给一堆说明文字。</span>
+            <h1 className="mt-3 text-3xl font-black tracking-tight md:text-[2.6rem]">
+              先把事情跑起来，
+              <span className="text-brand-300">别让界面挡路。</span>
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-              首页只保留三件事：当前任务、快速发起、结果总览。复杂配置留到设置页，不在首页铺满。
+              首页现在只留三类内容：快速发起、最近任务、系统状态。模板说明和全量任务默认折叠。
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <a href="#new-run" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+              <a href="#quick-run" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
                 新建任务
               </a>
               <Link
@@ -62,7 +62,7 @@ export default async function HomePage() {
             <div className="section-card p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="section-kicker">运行状态</div>
+                  <div className="section-kicker">系统状态</div>
                   <div className="mt-2 text-2xl font-bold text-slate-950">{workerMeta.label}</div>
                 </div>
                 <span className={`badge ${workerMeta.badgeClass}`}>{governance.worker.status}</span>
@@ -73,42 +73,31 @@ export default async function HomePage() {
                   <div className="mt-1 font-semibold text-slate-950">{formatRelativeTime(governance.worker.heartbeatAt)}</div>
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <div className="text-xs text-slate-500">最新任务</div>
-                  <div className="mt-1 font-semibold text-slate-950">{latestRun ? formatRelativeTime(latestRun.updatedAt) : "暂无"}</div>
+                  <div className="text-xs text-slate-500">默认 AI</div>
+                  <div className="mt-1 font-semibold text-slate-950">{defaultAiConnection ? defaultAiConnection.name : "未设置"}</div>
                 </div>
               </div>
             </div>
 
-            <div className="section-card p-5">
-              <div className="section-kicker">默认连接</div>
-              <div className="mt-2 text-lg font-bold text-slate-950">
-                {defaultAiConnection ? defaultAiConnection.name : "未设置默认 AI 连接"}
-              </div>
-              <div className="mt-2 text-sm text-slate-500">
-                {defaultAiConnection ? `${defaultAiConnection.model} · ${defaultAiConnection.baseUrl}` : "工厂图片理解可直接走这里，不必手写 webhook。"}
-              </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[
+                { label: "任务总数", value: totalRuns },
+                { label: "进行中", value: activeRuns },
+                { label: "待处理", value: attentionRuns },
+                { label: "完成率", value: `${completionRate}%` },
+              ].map((item) => (
+                <div key={item.label} className="section-card p-5">
+                  <div className="text-sm text-slate-500">{item.label}</div>
+                  <div className="mt-2 text-3xl font-black tracking-tight text-slate-950">{item.value}</div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "任务总数", value: totalRuns },
-          { label: "进行中", value: activeRuns },
-          { label: "待处理", value: attentionRuns },
-          { label: "完成率", value: `${completionRate}%` },
-        ].map((item) => (
-          <div key={item.label} className="section-card p-5">
-            <div className="text-sm text-slate-500">{item.label}</div>
-            <div className="mt-2 text-3xl font-black tracking-tight text-slate-950">{item.value}</div>
-          </div>
-        ))}
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.05fr_1.15fr]">
-        <ActionBoard runs={runs} governance={governance} />
-        <div id="new-run">
+      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <div id="quick-run">
           <LaunchRunForm
             templates={templates}
             governance={governance.settings}
@@ -116,29 +105,24 @@ export default async function HomePage() {
             aiConnections={aiConnections}
           />
         </div>
+        <ActionBoard runs={runs} governance={governance} />
       </section>
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="section-kicker">任务模板</div>
-            <h2 className="mt-2 text-2xl font-bold text-slate-950">先选要做什么</h2>
-          </div>
-          <div className="text-sm text-slate-500">{templates.length} 个模板</div>
+      <details className="section-card p-5">
+        <summary className="cursor-pointer text-lg font-semibold text-slate-950">查看模板说明</summary>
+        <div className="mt-5">
+          <TemplatesGrid templates={templates} />
         </div>
-        <TemplatesGrid templates={templates} />
-      </section>
+      </details>
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="section-kicker">任务列表</div>
-            <h2 className="mt-2 text-2xl font-bold text-slate-950">最近任务</h2>
-          </div>
-          <div className="text-sm text-slate-500">最近更新：{latestRun ? formatRelativeTime(latestRun.updatedAt) : "暂无"}</div>
+      <details className="section-card p-5">
+        <summary className="cursor-pointer text-lg font-semibold text-slate-950">
+          查看全部任务 {latestRun ? `· 最近更新 ${formatRelativeTime(latestRun.updatedAt)}` : ""}
+        </summary>
+        <div className="mt-5">
+          <RunsTable runs={runs} />
         </div>
-        <RunsTable runs={runs} />
-      </section>
+      </details>
     </main>
   );
 }
