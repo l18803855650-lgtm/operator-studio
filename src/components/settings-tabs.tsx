@@ -9,9 +9,9 @@ import { AiConnectionsPanel } from "@/components/ai-connections-panel";
 import { BrowserProfilesPanel } from "@/components/browser-profiles-panel";
 
 const tabs = [
-  { key: "base", label: "基础设置" },
-  { key: "api", label: "API 连接" },
-  { key: "browser", label: "浏览器资料" },
+  { key: "base", label: "基础" },
+  { key: "api", label: "API" },
+  { key: "browser", label: "浏览器" },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];

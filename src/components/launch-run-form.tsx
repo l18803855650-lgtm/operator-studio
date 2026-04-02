@@ -52,12 +52,6 @@ const executionInputDefaults: Record<string, string> = {
   ),
 };
 
-const templateHints: Record<string, string> = {
-  "browser-operator": "适合网页打开、登录、点击、留痕。",
-  "media-agent": "适合资料抓取、归档、导出。",
-  "factory-audit": "适合现场图片审计、问题汇总、PPT 输出。",
-};
-
 export function LaunchRunForm({
   templates,
   governance,
@@ -152,13 +146,9 @@ export function LaunchRunForm({
   return (
     <form onSubmit={handleSubmit} className="section-card overflow-hidden p-6 md:p-7">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <div className="section-kicker">快速发起</div>
-          <h3 className="mt-2 text-2xl font-bold text-slate-950">用默认值先跑起来</h3>
-          <p className="mt-2 text-sm text-slate-500">默认只保留必要项，其他都折到高级选项。</p>
-        </div>
+        <h3 className="text-2xl font-bold text-slate-950">新建任务</h3>
         <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-          默认：{governance.defaultLifecycle === "persistent" ? "常驻" : "临时"}
+          {governance.defaultLifecycle === "persistent" ? "常驻" : "临时"}
         </div>
       </div>
 
@@ -181,11 +171,6 @@ export function LaunchRunForm({
             <option value="persistent">常驻</option>
           </select>
         </label>
-      </div>
-
-      <div className="mt-4 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-        <div className="font-semibold text-slate-950">当前任务说明</div>
-        <div className="mt-1">{templateHints[selectedTemplate?.id ?? ""] || selectedTemplate?.summary}</div>
       </div>
 
       <label className="mt-4 block text-sm font-medium text-slate-700">
@@ -254,10 +239,7 @@ export function LaunchRunForm({
         </div>
       ) : null}
 
-      <div className="mt-5 flex items-center justify-between gap-4 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
-        <div className="text-sm text-slate-500">
-          默认会沿用系统设置；需要细调再打开高级选项。
-        </div>
+      <div className="mt-5 flex items-center justify-end gap-4 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
         <button
           disabled={submitting}
           className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"

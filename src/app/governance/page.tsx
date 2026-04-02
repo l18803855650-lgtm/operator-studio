@@ -16,14 +16,8 @@ export default async function GovernancePage() {
 
   return (
     <main className="page-shell space-y-6">
-      <section className="section-card overflow-hidden p-6 md:p-8">
-        <div className="rounded-[28px] bg-slate-950 p-7 text-white">
-          <div className="section-kicker text-white/50">设置</div>
-          <h1 className="mt-3 text-3xl font-black tracking-tight md:text-4xl">把复杂项放到这里</h1>
-          <p className="mt-3 text-sm leading-7 text-slate-300">
-            首页只保留核心操作。这一页按标签拆开，不再把所有设置一次性摊满。
-          </p>
-        </div>
+      <section className="section-card p-6 md:p-7">
+        <h1 className="text-3xl font-black tracking-tight text-slate-950 md:text-4xl">设置</h1>
       </section>
 
       <SettingsTabs

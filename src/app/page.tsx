@@ -37,14 +37,7 @@ export default async function HomePage() {
       <section className="section-card overflow-hidden p-6 md:p-8">
         <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr] xl:items-stretch">
           <div className="rounded-[28px] bg-slate-950 p-7 text-white">
-            <div className="section-kicker text-white/55">工作台</div>
-            <h1 className="mt-3 text-3xl font-black tracking-tight md:text-[2.6rem]">
-              先把事情跑起来，
-              <span className="text-brand-300">别让界面挡路。</span>
-            </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-              首页现在只留三类内容：快速发起、最近任务、系统状态。模板说明和全量任务默认折叠。
-            </p>
+            <h1 className="text-3xl font-black tracking-tight md:text-[2.6rem]">工作台</h1>
             <div className="mt-6 flex flex-wrap gap-3">
               <a href="#quick-run" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
                 新建任务
@@ -109,7 +102,7 @@ export default async function HomePage() {
       </section>
 
       <details className="section-card p-5">
-        <summary className="cursor-pointer text-lg font-semibold text-slate-950">查看模板说明</summary>
+        <summary className="cursor-pointer text-lg font-semibold text-slate-950">模板</summary>
         <div className="mt-5">
           <TemplatesGrid templates={templates} />
         </div>
@@ -117,7 +110,7 @@ export default async function HomePage() {
 
       <details className="section-card p-5">
         <summary className="cursor-pointer text-lg font-semibold text-slate-950">
-          查看全部任务 {latestRun ? `· 最近更新 ${formatRelativeTime(latestRun.updatedAt)}` : ""}
+          任务列表 {latestRun ? `· 最近更新 ${formatRelativeTime(latestRun.updatedAt)}` : ""}
         </summary>
         <div className="mt-5">
           <RunsTable runs={runs} />
