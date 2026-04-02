@@ -18,15 +18,12 @@ export default async function GovernancePage() {
 
   return (
     <main className="page-shell space-y-6">
-      <section className="section-card overflow-hidden p-8">
-        <div>
-          <div className="section-kicker">Settings & Connections</div>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950">
-            默认规则、AI 连接和凭据资料库都放在这里
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-500">
-            把默认生命周期、并发、视觉验收要求、用户自己的 API 连接，以及 Browser 登录凭据都收在一页。目标不是参数越多越强，
-            而是让别人第一次打开就能接上、跑起来。
+      <section className="section-card overflow-hidden p-6 md:p-8">
+        <div className="rounded-[28px] bg-slate-950 p-7 text-white">
+          <div className="section-kicker text-white/50">设置</div>
+          <h1 className="mt-3 text-3xl font-black tracking-tight md:text-4xl">把复杂项放到这里</h1>
+          <p className="mt-3 text-sm leading-7 text-slate-300">
+            首页只管发起和查看，这一页专门收默认规则、API 连接和登录资料。
           </p>
         </div>
       </section>

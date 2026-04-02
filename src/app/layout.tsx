@@ -4,8 +4,8 @@ import { AppHeader } from "@/components/app-header";
 import { getCurrentPageSession } from "@/lib/auth";
 
 export const metadata: Metadata = {
-  title: "Operator Studio｜可审计执行控制台",
-  description: "面向中文场景的可审计执行型 Agent 控制台，支持 run、回放、证据包与治理策略。",
+  title: "Operator Studio｜执行工作台",
+  description: "面向中文场景的执行工作台，支持任务运行、结果留痕、回放与系统设置。",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,10 +16,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="min-h-screen bg-transparent text-slate-900">
           <AppHeader username={session?.username} />
           {children}
-          <footer className="border-t border-white/60 bg-white/70 backdrop-blur">
-            <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-5 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
-              <div>Operator Studio · 中文优先 · 审计闭环 · 结果可回放</div>
-              <div>Next.js 14 · SQLite · SSE · Worker</div>
+          <footer className="border-t border-white/70 bg-white/70 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-7xl flex-col gap-2 px-5 py-5 text-sm text-slate-500 md:flex-row md:items-center md:justify-between md:px-6">
+              <div>Operator Studio · 本地部署 · 结果留痕</div>
+              <div>任务 · 回放 · 设置</div>
             </div>
           </footer>
         </div>

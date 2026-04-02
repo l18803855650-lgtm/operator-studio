@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listTemplates } from "@/features/templates/template.repository";
 import { listRuns } from "@/features/runs/run.service";
 import { getGovernanceStatus } from "@/features/governance/governance.service";
@@ -21,114 +22,120 @@ export default async function HomePage() {
     listBrowserProfiles(),
     listAiConnections(),
   ]);
+
   const totalRuns = runs.length;
-  const runningRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length;
-  const persistentRuns = runs.filter((run) => run.lifecycle === "persistent").length;
+  const activeRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length;
   const attentionRuns = runs.filter((run) => run.status === "attention").length;
   const completedRuns = runs.filter((run) => run.status === "completed").length;
   const completionRate = totalRuns === 0 ? 0 : Math.round((completedRuns / totalRuns) * 100);
-  const replayMissing = runs.filter((run) => run.riskFlags.includes("no-replay-pack")).length;
   const latestRun = [...runs].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
   const workerMeta = workerStatusMeta[governance.worker.status];
+  const defaultAiConnection = aiConnections.find((item) => item.id === governance.settings.defaultAiConnectionId) ?? null;
 
   return (
-    <main className="page-shell space-y-8">
-      <section className="section-card overflow-hidden p-8">
-        <div className="grid gap-8 xl:grid-cols-[1.35fr_0.95fr]">
-          <div>
-            <div className="section-kicker">Command Center</div>
-            <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 md:text-[2.6rem]">
-              让执行链路真闭环，
-              <span className="text-brand-700">不是只把界面堆得像个壳。</span>
+    <main className="page-shell space-y-6">
+      <section className="section-card overflow-hidden p-6 md:p-8">
+        <div className="grid gap-6 xl:grid-cols-[1.3fr_0.9fr] xl:items-stretch">
+          <div className="rounded-[28px] bg-slate-950 p-7 text-white">
+            <div className="section-kicker text-white/55">工作台</div>
+            <h1 className="mt-3 text-3xl font-black tracking-tight md:text-[2.7rem]">
+              把任务交给系统，
+              <span className="text-brand-300">不是交给一堆说明文字。</span>
             </h1>
-            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
-              这里盯三件事：run 有没有真正推进、证据有没有留下、治理规则有没有被写死到系统里。
-              这版界面按中文使用习惯重排了信息层级，优先把「现在该看什么、下一步干什么」摆到最前面。
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+              首页只保留三件事：当前任务、快速发起、结果总览。复杂配置留到设置页，不在首页铺满。
             </p>
-            <div className="mt-5 flex flex-wrap gap-2 text-sm text-slate-600">
-              <span className="badge border-brand-200 bg-brand-50 text-brand-700">中文优先表达</span>
-              <span className="badge border-slate-200 bg-white text-slate-700">运行态摘要</span>
-              <span className="badge border-slate-200 bg-white text-slate-700">证据 / 回放 / 风险同屏</span>
-              <span className="badge border-slate-200 bg-white text-slate-700">治理默认可见</span>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href="#new-run" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+                新建任务
+              </a>
+              <Link
+                href="/governance"
+                className="rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                打开设置
+              </Link>
             </div>
           </div>
 
-          <div className="rounded-[28px] bg-slate-950 p-6 text-white shadow-soft">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.28em] text-brand-200">Studio heartbeat</div>
-                <div className="mt-2 text-2xl font-bold">worker {workerMeta.label}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{workerMeta.hint}</p>
+          <div className="grid gap-4">
+            <div className="section-card p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="section-kicker">运行状态</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{workerMeta.label}</div>
+                </div>
+                <span className={`badge ${workerMeta.badgeClass}`}>{governance.worker.status}</span>
               </div>
-              <span className={`badge ${workerMeta.badgeClass}`}>{governance.worker.status}</span>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <div className="text-xs text-slate-500">最近心跳</div>
+                  <div className="mt-1 font-semibold text-slate-950">{formatRelativeTime(governance.worker.heartbeatAt)}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <div className="text-xs text-slate-500">最新任务</div>
+                  <div className="mt-1 font-semibold text-slate-950">{latestRun ? formatRelativeTime(latestRun.updatedAt) : "暂无"}</div>
+                </div>
+              </div>
             </div>
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="text-xs text-slate-400">最近心跳</div>
-                <div className="mt-2 text-lg font-semibold">{formatRelativeTime(governance.worker.heartbeatAt)}</div>
-                <div className="mt-1 text-xs text-slate-400">{governance.worker.heartbeatAt ?? "暂无记录"}</div>
+
+            <div className="section-card p-5">
+              <div className="section-kicker">默认连接</div>
+              <div className="mt-2 text-lg font-bold text-slate-950">
+                {defaultAiConnection ? defaultAiConnection.name : "未设置默认 AI 连接"}
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="text-xs text-slate-400">最新 run 动作</div>
-                <div className="mt-2 text-lg font-semibold">{latestRun ? formatRelativeTime(latestRun.updatedAt) : "还没有"}</div>
-                <div className="mt-1 line-clamp-2 text-xs text-slate-400">{latestRun?.title ?? "先发起一个 run，才能开始积累回放与证据。"}</div>
+              <div className="mt-2 text-sm text-slate-500">
+                {defaultAiConnection ? `${defaultAiConnection.model} · ${defaultAiConnection.baseUrl}` : "工厂图片理解可直接走这里，不必手写 webhook。"}
               </div>
-            </div>
-            <div className="mt-4 rounded-2xl border border-brand-300/20 bg-brand-400/10 p-4 text-sm leading-6 text-slate-200">
-              当前治理默认：
-              <span className="font-semibold text-white"> {governance.settings.defaultLifecycle === "persistent" ? "常驻" : "临时"}</span>
-              ，并发
-              <span className="font-semibold text-white"> {governance.settings.maxConcurrentRuns}</span>
-              ，预算
-              <span className="font-semibold text-white"> {governance.settings.dailyRunBudget}</span>
-              。
             </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: "总 run", value: totalRuns, tone: "text-slate-900", hint: "沉淀在库里的全部运行记录" },
-          { label: "活跃中", value: runningRuns, tone: "text-amber-600", hint: "排队 + 执行中的 run" },
-          { label: "待介入", value: attentionRuns, tone: "text-red-600", hint: "需要人工接管的问题单" },
-          { label: "常驻 run", value: persistentRuns, tone: "text-brand-700", hint: "长生命周期对象" },
-          { label: "完成率", value: `${completionRate}%`, tone: "text-emerald-700", hint: "已完成 / 总数" },
-          { label: "缺 replay", value: replayMissing, tone: "text-fuchsia-700", hint: "完成但仍缺回放包" },
-        ].map((card) => (
-          <div key={card.label} className="section-card p-5">
-            <div className="text-sm text-slate-500">{card.label}</div>
-            <div className={`mt-2 text-3xl font-black tracking-tight ${card.tone}`}>{card.value}</div>
-            <div className="mt-2 text-xs leading-5 text-slate-500">{card.hint}</div>
+          { label: "任务总数", value: totalRuns },
+          { label: "进行中", value: activeRuns },
+          { label: "待处理", value: attentionRuns },
+          { label: "完成率", value: `${completionRate}%` },
+        ].map((item) => (
+          <div key={item.label} className="section-card p-5">
+            <div className="text-sm text-slate-500">{item.label}</div>
+            <div className="mt-2 text-3xl font-black tracking-tight text-slate-950">{item.value}</div>
           </div>
         ))}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.95fr]">
+      <section className="grid gap-6 xl:grid-cols-[1.05fr_1.15fr]">
         <ActionBoard runs={runs} governance={governance} />
-        <LaunchRunForm templates={templates} governance={governance.settings} browserProfiles={browserProfiles} aiConnections={aiConnections} />
+        <div id="new-run">
+          <LaunchRunForm
+            templates={templates}
+            governance={governance.settings}
+            browserProfiles={browserProfiles}
+            aiConnections={aiConnections}
+          />
+        </div>
       </section>
 
       <section className="space-y-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="section-kicker">Template library</div>
-            <h2 className="mt-2 text-2xl font-bold text-slate-950">可直接套用的执行模板</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-500">Browser / Media / Manufacturing 三条主线都保留了模型策略、步骤、验收方式和适用场景。</p>
+            <div className="section-kicker">任务模板</div>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">先选要做什么</h2>
           </div>
-          <div className="text-sm text-slate-500">当前模板数：{templates.length}</div>
+          <div className="text-sm text-slate-500">{templates.length} 个模板</div>
         </div>
         <TemplatesGrid templates={templates} />
       </section>
 
       <section className="space-y-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="section-kicker">Runs overview</div>
-            <h2 className="mt-2 text-2xl font-bold text-slate-950">运行总览 / 中文筛选台</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-500">按状态、生命周期、领域和关键词直接筛。重点 run 不再淹死在一张原始表里。</p>
+            <div className="section-kicker">任务列表</div>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">最近任务</h2>
           </div>
-          <div className="text-sm text-slate-500">最近活跃：{latestRun ? formatRelativeTime(latestRun.updatedAt) : "暂无"}</div>
+          <div className="text-sm text-slate-500">最近更新：{latestRun ? formatRelativeTime(latestRun.updatedAt) : "暂无"}</div>
         </div>
         <RunsTable runs={runs} />
       </section>
